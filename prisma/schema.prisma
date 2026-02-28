@@ -1,0 +1,190 @@
+ 
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Restaurant {
+  id          String   @id @default(cuid())
+  name        String
+  address     String
+  phone       String
+  email       String
+  storeCode  String   @unique
+  managerName String
+
+  // Relations
+  users        RestaurantUser[]
+  inspections  Inspection[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("restaurants")
+}
+
+// ─────────────────────────────────────────────────────────────
+// USER
+// A user can belong to multiple restaurants via RestaurantUser.
+// Auth fields kept minimal — extend if using NextAuth / Clerk etc.
+// ─────────────────────────────────────────────────────────────
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String   // store bcrypt hash, never plain text
+  phone        String?
+
+  // Relations
+  restaurants  RestaurantUser[]
+  inspections  Inspection[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────
+// RESTAURANT ↔ USER  (many-to-many join table)
+// A user can be an auditor at multiple restaurants.
+// ─────────────────────────────────────────────────────────────
+model RestaurantUser {
+  id           String     @id @default(cuid())
+
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime   @default(now())
+
+  @@unique([restaurantId, userId]) // a user can only be linked once per restaurant
+  @@map("restaurant_users")
+}
+
+// ─────────────────────────────────────────────────────────────
+// CHECKLIST TEMPLATE  (the 33 FS questions — seeded once)
+// These are the static question definitions.
+// ─────────────────────────────────────────────────────────────
+model ChecklistTemplate {
+  id          String   @id @default(cuid())
+  code        String   @unique  // e.g. "FS1"
+  title       String
+  description String   @db.Text
+  points      Int      @default(0)
+  isCritical  Boolean  @default(false)
+  section     String   // e.g. "Critical Food Safety"
+  sortOrder   Int
+
+  // Relations
+  subItems    ChecklistSubItem[]
+  answers     ChecklistAnswer[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("checklist_templates")
+}
+
+// Sub-items are the failure reasons shown when a question is answered NO
+model ChecklistSubItem {
+  id         String            @id @default(cuid())
+  label      String
+  sortOrder  Int
+
+  templateId String
+  template   ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  selectedIn SelectedSubItem[]
+
+  @@map("checklist_sub_items")
+}
+
+// ─────────────────────────────────────────────────────────────
+// INSPECTION
+// One audit session. Belongs to a restaurant, done by a user.
+// A restaurant can have many inspections over time.
+// ─────────────────────────────────────────────────────────────
+model Inspection {
+  id              String           @id @default(cuid())
+
+  restaurantId    String
+  restaurant      Restaurant       @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  userId          String
+  user            User             @relation(fields: [userId], references: [id])
+
+  status          InspectionStatus @default(IN_PROGRESS)
+  totalScore      Int?             // calculated on completion
+  maxScore        Int?             // max possible score
+  hasCriticalFail Boolean          @default(false)
+
+  // Relations
+  answers         ChecklistAnswer[]
+
+  startedAt       DateTime         @default(now())
+  completedAt     DateTime?
+  updatedAt       DateTime         @updatedAt
+
+  @@map("inspections")
+}
+
+enum InspectionStatus {
+  IN_PROGRESS
+  COMPLETED
+  VOIDED
+}
+
+// ─────────────────────────────────────────────────────────────
+// CHECKLIST ANSWER
+// One row per question per inspection.
+// ─────────────────────────────────────────────────────────────
+model ChecklistAnswer {
+  id           String            @id @default(cuid())
+
+  inspectionId String
+  inspection   Inspection        @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+
+  templateId   String
+  template     ChecklistTemplate @relation(fields: [templateId], references: [id])
+
+  answer       AnswerValue       @default(UNANSWERED)
+  notes        String?           @db.Text  // free text the auditor can add
+
+  selectedSubItems SelectedSubItem[]
+
+  answeredAt   DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@unique([inspectionId, templateId]) // one answer per question per inspection
+  @@map("checklist_answers")
+}
+
+enum AnswerValue {
+  YES
+  NO
+  UNANSWERED
+}
+
+// ─────────────────────────────────────────────────────────────
+// SELECTED SUB ITEM
+// Which failure reasons were ticked when an answer is NO.
+// ─────────────────────────────────────────────────────────────
+model SelectedSubItem {
+  id        String           @id @default(cuid())
+
+  answerId  String
+  answer    ChecklistAnswer  @relation(fields: [answerId], references: [id], onDelete: Cascade)
+
+  subItemId String
+  subItem   ChecklistSubItem @relation(fields: [subItemId], references: [id])
+
+  @@unique([answerId, subItemId])
+  @@map("selected_sub_items")
+}
