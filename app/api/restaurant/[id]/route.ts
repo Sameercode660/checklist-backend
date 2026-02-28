@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
-type Params = { params: { id: string } }
+type Params = { params: Promise<{ id: string }> }
 
 // ── GET /api/restaurants/:id ─────────────────────────────────
 export async function GET(_req: NextRequest, { params }: Params) {
+
+  const {id} = await params
   const restaurant = await prisma.restaurant.findUnique({
-    where: { id: params.id },
+    where: { id},
     include: {
       _count: {
         select: {
@@ -29,12 +31,13 @@ export async function GET(_req: NextRequest, { params }: Params) {
 // Partial update — only send fields you want to change
 export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json()
+  const {id} = await params
   const { name, address, phone, email, storeCode, managerName } = body
 
   // If storeCode is being changed, make sure it's not already taken
   if (storeCode) {
     const existing = await prisma.restaurant.findFirst({
-      where: { storeCode, NOT: { id: params.id } },
+      where: { storeCode, NOT: { id } },
     })
     if (existing) {
       return NextResponse.json(
@@ -45,7 +48,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const restaurant = await prisma.restaurant.update({
-    where: { id: params.id },
+    where: { id },
     data: {
       ...(name        && { name }),
       ...(address     && { address }),
@@ -61,6 +64,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
 // ── DELETE /api/restaurants/:id ──────────────────────────────
 export async function DELETE(_req: NextRequest, { params }: Params) {
-  await prisma.restaurant.delete({ where: { id: params.id } })
+  const {id } = await params
+  await prisma.restaurant.delete({ where: { id } })
   return NextResponse.json({ message: 'Restaurant deleted successfully' })
 }
